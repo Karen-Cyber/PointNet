@@ -147,7 +147,7 @@ class ModelNetDataset(data.Dataset):
                  split='train',
                  data_augmentation=True):
         self.npoints = npoints
-        self.root = root
+        self.root = os.path.realpath(root)
         self.split = split
         self.data_augmentation = data_augmentation
         self.fns = []
