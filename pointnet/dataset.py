@@ -111,10 +111,10 @@ class ShapeNetDataset(data.Dataset):
         cls = self.classes[self.datapath[index][0]]
         point_set = np.loadtxt(fn[1]).astype(np.float32)
         seg = np.loadtxt(fn[2]).astype(np.int64)
-        #print(point_set.shape, seg.shape)
+        # print(point_set.shape, seg.shape)
 
         choice = np.random.choice(len(seg), self.npoints, replace=True)
-        #resample
+        # resample
         point_set = point_set[choice, :]
 
         point_set = point_set - np.expand_dims(np.mean(point_set, axis = 0), 0) # center
@@ -143,7 +143,7 @@ class ShapeNetDataset(data.Dataset):
 class ModelNetDataset(data.Dataset):
     def __init__(self,
                  root,
-                 npoints=2500,
+                 npoints=1024,
                  split='train',
                  data_augmentation=True):
         self.npoints = npoints
@@ -165,6 +165,17 @@ class ModelNetDataset(data.Dataset):
         self.classes = list(self.cat.keys())
 
     def __getitem__(self, index):
+
+        '''
+        function overloading of operator [] for dataset ModelNet40
+
+        params:
+            - index:    class index of label(class indexes are self defined)
+        
+        return:
+            - points:   xyz list of the points
+            - cls:      catagory of the points
+        '''
         fn = self.fns[index]
         cls = self.cat[fn.split('/')[0]]
         with open(os.path.join(self.root, fn), 'rb') as f:
@@ -173,9 +184,9 @@ class ModelNetDataset(data.Dataset):
         choice = np.random.choice(len(pts), self.npoints, replace=True)
         point_set = pts[choice, :]
 
-        point_set = point_set - np.expand_dims(np.mean(point_set, axis=0), 0)  # center
+        point_set = point_set - np.expand_dims(np.mean(point_set, axis=0), 0)  # move to center(0, 0, 0)
         dist = np.max(np.sqrt(np.sum(point_set ** 2, axis=1)), 0)
-        point_set = point_set / dist  # scale
+        point_set = point_set / dist  # scale to unit sphere
 
         if self.data_augmentation:
             theta = np.random.uniform(0, np.pi * 2)

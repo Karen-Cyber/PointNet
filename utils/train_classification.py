@@ -13,17 +13,13 @@ from tqdm import tqdm
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    '--batchSize', type=int, default=32, help='input batch size')
-parser.add_argument(
-    '--num_points', type=int, default=2500, help='input batch size')
-parser.add_argument(
-    '--workers', type=int, help='number of data loading workers', default=4)
-parser.add_argument(
-    '--nepoch', type=int, default=250, help='number of epochs to train for')
-parser.add_argument('--outf', type=str, default='cls', help='output folder')
-parser.add_argument('--model', type=str, default='', help='model path')
-parser.add_argument('--dataset', type=str, required=True, help="dataset path")
+parser.add_argument('--batchSize',    type=int, default=8, help='input batch size')
+parser.add_argument('--num_points',   type=int, default=1024, help='points per sample')
+parser.add_argument('--workers',      type=int, default=4, help='number of data loading workers')
+parser.add_argument('--nepoch',       type=int, default=100, help='number of epochs to train for')
+parser.add_argument('--outf',         type=str, default='cls', help='output folder')
+parser.add_argument('--model',        type=str, default='', help='existing previous model path')
+parser.add_argument('--dataset',      type=str, required=True, help="dataset path")
 parser.add_argument('--dataset_type', type=str, default='shapenet', help="dataset type shapenet|modelnet40")
 parser.add_argument('--feature_transform', action='store_true', help="use feature transform")
 
@@ -41,23 +37,24 @@ if opt.dataset_type == 'shapenet':
     dataset = ShapeNetDataset(
         root=opt.dataset,
         classification=True,
+        split="train",
         npoints=opt.num_points)
 
     test_dataset = ShapeNetDataset(
         root=opt.dataset,
         classification=True,
-        split='test',
+        split="test",
         npoints=opt.num_points,
         data_augmentation=False)
 elif opt.dataset_type == 'modelnet40':
     dataset = ModelNetDataset(
         root=opt.dataset,
         npoints=opt.num_points,
-        split='trainval')
+        split="train")
 
     test_dataset = ModelNetDataset(
         root=opt.dataset,
-        split='test',
+        split="test",
         npoints=opt.num_points,
         data_augmentation=False)
 else:

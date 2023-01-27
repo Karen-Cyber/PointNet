@@ -7,16 +7,19 @@ from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
 
-
+# "STN" is the abbreviation for "Spatial Transform Network"
 class STN3d(nn.Module):
     def __init__(self):
         super(STN3d, self).__init__()
+        # 一维卷积网络不是很常见，可以类比二维卷积网络，当卷积的通道深度大于1时
+        # 卷积核从二维“面”变为三维的“体”，那么一维卷积的通道数大于1时，可以理解
+        # 为一条线，往后拓展扫过变成面，一维的线在高维卷积核的作用下，变成了面。
         self.conv1 = torch.nn.Conv1d(3, 64, 1)
         self.conv2 = torch.nn.Conv1d(64, 128, 1)
         self.conv3 = torch.nn.Conv1d(128, 1024, 1)
         self.fc1 = nn.Linear(1024, 512)
         self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, 9)
+        self.fc3 = nn.Linear(256, 9) # 旋转矩阵的九个元素，以一维向量的形式表达方便构建全连接层，进行矩阵乘法的时候再torch.view()变换shape进行矩阵乘法
         self.relu = nn.ReLU()
 
         self.bn1 = nn.BatchNorm1d(64)
@@ -25,7 +28,7 @@ class STN3d(nn.Module):
         self.bn4 = nn.BatchNorm1d(512)
         self.bn5 = nn.BatchNorm1d(256)
 
-
+    # 原论文：mini-network "T-Net" resembles the total net work
     def forward(self, x):
         batchsize = x.size()[0]
         x = F.relu(self.bn1(self.conv1(x)))
@@ -45,10 +48,13 @@ class STN3d(nn.Module):
         x = x.view(-1, 3, 3)
         return x
 
-
 class STNkd(nn.Module):
     def __init__(self, k=64):
         super(STNkd, self).__init__()
+        # 使用一维卷积而非全连接层的原因是，所有的点输入组成一个样本
+        # 而我们不希望顺序的对每个点使用这一套全连接层，卷积层能很好
+        # 的解决这个问题，尺寸为1的卷积核能并行的将每个点云点的坐标
+        # 输入全连接映射到高维特征输出
         self.conv1 = torch.nn.Conv1d(k, 64, 1)
         self.conv2 = torch.nn.Conv1d(64, 128, 1)
         self.conv3 = torch.nn.Conv1d(128, 1024, 1)
@@ -100,11 +106,11 @@ class PointNetfeat(nn.Module):
             self.fstn = STNkd(k=64)
 
     def forward(self, x):
-        n_pts = x.size()[2]
+        n_pts = x.size()[2] # dim0: batch_size, dim1: channel_num, dim2: points_num, dim3: features_num
         trans = self.stn(x)
-        x = x.transpose(2, 1)
-        x = torch.bmm(x, trans)
-        x = x.transpose(2, 1)
+        x = x.transpose(2, 1) # 将每个feature_channel有多少个点转换成每个点有多少个feature_channel
+        x = torch.bmm(x, trans) # batch multiplication between matrix, not accept other data type(e.g. vector)
+        x = x.transpose(2, 1) # 将每个点有多少个feature_channel转换为每个feature_channel有多少个点
         x = F.relu(self.bn1(self.conv1(x)))
 
         if self.feature_transform:
@@ -145,7 +151,6 @@ class PointNetCls(nn.Module):
         x = F.relu(self.bn2(self.dropout(self.fc2(x))))
         x = self.fc3(x)
         return F.log_softmax(x, dim=1), trans, trans_feat
-
 
 class PointNetDenseCls(nn.Module):
     def __init__(self, k = 2, feature_transform=False):
