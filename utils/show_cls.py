@@ -13,8 +13,8 @@ import torch.nn.functional as F
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--model', type=str, default = '',  help='model path')
-parser.add_argument('--num_points', type=int, default=2500, help='input batch size')
+parser.add_argument('--model', type=str, default = '',  help='trained model path')
+parser.add_argument('--num_points', type=int, default=1024, help='number of sampled points')
 
 
 opt = parser.parse_args()

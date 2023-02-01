@@ -1,11 +1,13 @@
 .ipynb_checkpoints/
 data
+*.log
 *.pyc
 *.ipynb
-shapenetcore_partanno_segmentation_benchmark_v0/
 *.so
 .idea*
+*.egg-info/
+shapenetcore_partanno_segmentation_benchmark_v0/
 cls/
 seg/
-*.egg-info/
 datasets/*
+.vscode/*

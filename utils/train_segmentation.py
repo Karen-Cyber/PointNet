@@ -14,17 +14,14 @@ import numpy as np
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    '--batchSize', type=int, default=32, help='input batch size')
-parser.add_argument(
-    '--workers', type=int, help='number of data loading workers', default=4)
-parser.add_argument(
-    '--nepoch', type=int, default=25, help='number of epochs to train for')
-parser.add_argument('--outf', type=str, default='seg', help='output folder')
-parser.add_argument('--model', type=str, default='', help='model path')
-parser.add_argument('--dataset', type=str, required=True, help="dataset path")
-parser.add_argument('--class_choice', type=str, default='Chair', help="class_choice")
-parser.add_argument('--feature_transform', action='store_true', help="use feature transform")
+parser.add_argument("--batch_size",     type=int, default=8,        help="input batch size")
+parser.add_argument("--num_workers",    type=int, default=4,        help="number of data loading workers")
+parser.add_argument("--num_epochs",     type=int, default=100,      help="number of epochs to train for")
+parser.add_argument("--outf",           type=str, default="seg",    help="output folder")
+parser.add_argument("--model",          type=str, default="",       help="model path")
+parser.add_argument("--dataset",        type=str, required=True,    help="dataset path")
+parser.add_argument("--class_choice",   type=str, default="Chair",  help="class_choice")
+parser.add_argument("--feature_transform", action="store_true",     help="use feature transform")
 
 opt = parser.parse_args()
 print(opt)
@@ -34,27 +31,29 @@ print("Random Seed: ", opt.manualSeed)
 random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
+# segmentation only accepts dense pointcloud data
 dataset = ShapeNetDataset(
     root=opt.dataset,
+    split="train",
     classification=False,
     class_choice=[opt.class_choice])
 dataloader = torch.utils.data.DataLoader(
     dataset,
-    batch_size=opt.batchSize,
+    batch_size=opt.batch_size,
     shuffle=True,
-    num_workers=int(opt.workers))
+    num_workers=int(opt.num_workers))
 
 test_dataset = ShapeNetDataset(
     root=opt.dataset,
     classification=False,
     class_choice=[opt.class_choice],
-    split='test',
+    split="test",
     data_augmentation=False)
 testdataloader = torch.utils.data.DataLoader(
     test_dataset,
-    batch_size=opt.batchSize,
+    batch_size=opt.batch_size,
     shuffle=True,
-    num_workers=int(opt.workers))
+    num_workers=int(opt.num_workers))
 
 print(len(dataset), len(test_dataset))
 num_classes = dataset.num_seg_classes
@@ -75,10 +74,9 @@ optimizer = optim.Adam(classifier.parameters(), lr=0.001, betas=(0.9, 0.999))
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 classifier.cuda()
 
-num_batch = len(dataset) / opt.batchSize
+num_batch = len(dataset) / opt.batch_size
 
-for epoch in range(opt.nepoch):
-    scheduler.step()
+for epoch in range(opt.num_epochs):
     for i, data in enumerate(dataloader, 0):
         points, target = data
         points = points.transpose(2, 1)
@@ -96,7 +94,7 @@ for epoch in range(opt.nepoch):
         optimizer.step()
         pred_choice = pred.data.max(1)[1]
         correct = pred_choice.eq(target.data).cpu().sum()
-        print('[%d: %d/%d] train loss: %f accuracy: %f' % (epoch, i, num_batch, loss.item(), correct.item()/float(opt.batchSize * 2500)))
+        print('[%d: %d/%d] train loss: %f accuracy: %f' % (epoch, i, num_batch, loss.item(), correct.item()/float(opt.batch_size * 2500)))
 
         if i % 10 == 0:
             j, data = next(enumerate(testdataloader, 0))
@@ -110,7 +108,8 @@ for epoch in range(opt.nepoch):
             loss = F.nll_loss(pred, target)
             pred_choice = pred.data.max(1)[1]
             correct = pred_choice.eq(target.data).cpu().sum()
-            print('[%d: %d/%d] %s loss: %f accuracy: %f' % (epoch, i, num_batch, blue('test'), loss.item(), correct.item()/float(opt.batchSize * 2500)))
+            print('[%d: %d/%d] %s loss: %f accuracy: %f' % (epoch, i, num_batch, blue('test'), loss.item(), correct.item()/float(opt.batch_size * 2500)))
+    scheduler.step()
 
     torch.save(classifier.state_dict(), '%s/seg_model_%s_%d.pth' % (opt.outf, opt.class_choice, epoch))
 

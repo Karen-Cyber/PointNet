@@ -9,17 +9,20 @@ import torch.nn.functional as F
 
 # "STN" is the abbreviation for "Spatial Transform Network"
 class STN3d(nn.Module):
-    def __init__(self):
+    # 空间转换网络只需要3x3，而不需要4x4的齐次矩阵是因为数据
+    # 样本已经做了归一化和中心化处理，所有样本坐标中心都是原
+    # 点，只剩下旋转变换需要学习
+    def __init__(self, channel=3):
         super(STN3d, self).__init__()
         # 一维卷积网络不是很常见，可以类比二维卷积网络，当卷积的通道深度大于1时
         # 卷积核从二维“面”变为三维的“体”，那么一维卷积的通道数大于1时，可以理解
         # 为一条线，往后拓展扫过变成面，一维的线在高维卷积核的作用下，变成了面。
-        self.conv1 = torch.nn.Conv1d(3, 64, 1)
+        self.conv1 = torch.nn.Conv1d(channel, 64, 1)
         self.conv2 = torch.nn.Conv1d(64, 128, 1)
         self.conv3 = torch.nn.Conv1d(128, 1024, 1)
         self.fc1 = nn.Linear(1024, 512)
         self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, 9) # 旋转矩阵的九个元素，以一维向量的形式表达方便构建全连接层，进行矩阵乘法的时候再torch.view()变换shape进行矩阵乘法
+        self.fc3 = nn.Linear(256, 9) # 旋转矩阵的九个分量，以一维向量的形式表达方便构建全连接层，进行矩阵乘法的时候再torch.view()变换shape进行矩阵乘法
         self.relu = nn.ReLU()
 
         self.bn1 = nn.BatchNorm1d(64)
@@ -30,17 +33,21 @@ class STN3d(nn.Module):
 
     # 原论文：mini-network "T-Net" resembles the total net work
     def forward(self, x):
+        # 通过输入一个样本点云'x'，得到该点云的预测空间变换矩阵'trans': shape([1, 9])
         batchsize = x.size()[0]
         x = F.relu(self.bn1(self.conv1(x)))
         x = F.relu(self.bn2(self.conv2(x)))
         x = F.relu(self.bn3(self.conv3(x)))
-        x = torch.max(x, 2, keepdim=True)[0]
+        x = torch.max(x, 2, keepdim=True)[0] # torch.max will return 2 values, max values and indices of these max values
         x = x.view(-1, 1024)
 
         x = F.relu(self.bn4(self.fc1(x)))
         x = F.relu(self.bn5(self.fc2(x)))
         x = self.fc3(x)
-
+        # 向仿射变换矩阵添加单位阵的目的是，使得变换符合正交矩阵，因为刚体旋转
+        # 矩阵一定是正交阵，单一阵就相当于什么变换都不做的旋转矩阵，让空间变换
+        # 网络在标准单一阵上学习偏差量，保证变换矩阵是由正交阵学习而来。这种思
+        # 想有点类似于残差网络？
         iden = Variable(torch.from_numpy(np.array([1,0,0,0,1,0,0,0,1]).astype(np.float32))).view(1,9).repeat(batchsize,1)
         if x.is_cuda:
             iden = iden.cuda()
@@ -82,8 +89,9 @@ class STNkd(nn.Module):
         x = F.relu(self.bn4(self.fc1(x)))
         x = F.relu(self.bn5(self.fc2(x)))
         x = self.fc3(x)
-
-        iden = Variable(torch.from_numpy(np.eye(self.k).flatten().astype(np.float32))).view(1,self.k*self.k).repeat(batchsize,1)
+        # repeat(dim0[, dim1, ...]), repeat the data in the corresponding dimension 'dim' times
+        # repeat(1) for keeping original no change
+        iden = Variable(torch.from_numpy(np.eye(self.k).flatten().astype(np.float32))).view(1, self.k*self.k).repeat(batchsize,1)
         if x.is_cuda:
             iden = iden.cuda()
         x = x + iden
@@ -91,10 +99,14 @@ class STNkd(nn.Module):
         return x
 
 class PointNetfeat(nn.Module):
-    def __init__(self, global_feat = True, feature_transform = False):
+    def __init__(self, in_channel=3, ft_channel=64, global_feat=True, feature_transform=False):
         super(PointNetfeat, self).__init__()
-        self.stn = STN3d()
-        self.conv1 = torch.nn.Conv1d(3, 64, 1)
+        self.in_channel = in_channel
+        self.ft_channel = ft_channel
+        # first pass through a 3d spatial transform network
+        self.stn = STN3d(channel=in_channel)
+        # then, pass through a kd feature transform network
+        self.conv1 = torch.nn.Conv1d(in_channel, ft_channel, 1)
         self.conv2 = torch.nn.Conv1d(64, 128, 1)
         self.conv3 = torch.nn.Conv1d(128, 1024, 1)
         self.bn1 = nn.BatchNorm1d(64)
@@ -103,16 +115,22 @@ class PointNetfeat(nn.Module):
         self.global_feat = global_feat
         self.feature_transform = feature_transform
         if self.feature_transform:
-            self.fstn = STNkd(k=64)
+            self.fstn = STNkd(k=ft_channel)
 
     def forward(self, x):
-        n_pts = x.size()[2] # dim0: batch_size, dim1: channel_num, dim2: points_num, dim3: features_num
+        n_pts = x.size()[2]                 # [batch_size, channel_size=3, sample_points_num]
         trans = self.stn(x)
-        x = x.transpose(2, 1) # 将每个feature_channel有多少个点转换成每个点有多少个feature_channel
-        x = torch.bmm(x, trans) # batch multiplication between matrix, not accept other data type(e.g. vector)
-        x = x.transpose(2, 1) # 将每个点有多少个feature_channel转换为每个feature_channel有多少个点
-        x = F.relu(self.bn1(self.conv1(x)))
+        x = x.transpose(2, 1)               # [batch_size, sample_points_num, channel_size=3]
+        if self.in_channel > 3:
+            other_feat = x[:, :, 3:]        # features other than (x,y,z) starts from index=3
+            x = x[:, :, :3]
+        x = torch.bmm(x, trans)             # batch multiplication between matrix, not accept other data type(e.g. vector)
+        if self.in_channel > 3:
+            # remember to concatenate back after xyz transformation
+            x = torch.cat([x, other_feat], dim=2)
+        x = x.transpose(2, 1)               # [batch_size, channel_size=3, sample_points_num]
 
+        x = F.relu(self.bn1(self.conv1(x))) # [batch_size, channel_size=64, sample_points_num]
         if self.feature_transform:
             trans_feat = self.fstn(x)
             x = x.transpose(2,1)
@@ -123,20 +141,30 @@ class PointNetfeat(nn.Module):
 
         pointfeat = x
         x = F.relu(self.bn2(self.conv2(x)))
-        x = self.bn3(self.conv3(x))
-        x = torch.max(x, 2, keepdim=True)[0]
-        x = x.view(-1, 1024)
+        x = self.bn3(self.conv3(x))          # the last layer of the fully connected block don't use activation
+        x = torch.max(x, 2, keepdim=True)[0] # just need the result, don't need values' indices. [bs, 1024, 1]
+        x = x.view(-1, 1024)                 # summarize the feature point of each channel. [bs, 1024]
         if self.global_feat:
             return x, trans, trans_feat
         else:
+            # False, the whole pipeline has not done yet
+            # return the local feature concatenated with
+            # the global feature
+
+            # repeat 'n_pts' times, because input points
+            # in every  channel(here is 1024)  need  the
+            # feature value of that channel.
             x = x.view(-1, 1024, 1).repeat(1, 1, n_pts)
-            return torch.cat([x, pointfeat], 1), trans, trans_feat
+            # concatenate on 'channel' dimension. Channel in 'x' and 'pointfeat' of each batch
+            # are concatenated together. Dimension at which the concate is taken place on  can 
+            # be unequal, other dimensions must match.
+            return torch.cat([x, pointfeat], 1), trans, trans_feat # 1024 + 64
 
 class PointNetCls(nn.Module):
     def __init__(self, k=2, feature_transform=False):
         super(PointNetCls, self).__init__()
         self.feature_transform = feature_transform
-        self.feat = PointNetfeat(global_feat=True, feature_transform=feature_transform)
+        self.feat = PointNetfeat(in_channel=3, ft_channel=64, global_feat=True, feature_transform=feature_transform)
         self.fc1 = nn.Linear(1024, 512)
         self.fc2 = nn.Linear(512, 256)
         self.fc3 = nn.Linear(256, k)
@@ -153,11 +181,11 @@ class PointNetCls(nn.Module):
         return F.log_softmax(x, dim=1), trans, trans_feat
 
 class PointNetDenseCls(nn.Module):
-    def __init__(self, k = 2, feature_transform=False):
+    def __init__(self, k = 2, use_feattrans=False):
         super(PointNetDenseCls, self).__init__()
         self.k = k
-        self.feature_transform=feature_transform
-        self.feat = PointNetfeat(global_feat=False, feature_transform=feature_transform)
+        self.use_feattrans=use_feattrans
+        self.feat = PointNetfeat(channel=3, global_feat=False, feature_transform=use_feattrans)
         self.conv1 = torch.nn.Conv1d(1088, 512, 1)
         self.conv2 = torch.nn.Conv1d(512, 256, 1)
         self.conv3 = torch.nn.Conv1d(256, 128, 1)
@@ -178,6 +206,13 @@ class PointNetDenseCls(nn.Module):
         x = F.log_softmax(x.view(-1,self.k), dim=-1)
         x = x.view(batchsize, n_pts, self.k)
         return x, trans, trans_feat
+
+class PointNetSegmnCls(nn.Module):
+    def __init__(self, channel=9, use_feattrans=False) -> None:
+        super(PointNetSegmnCls, self).__init__()
+        # output of STN-feat block is concatenated to the back of original input
+        self.feat = PointNetfeat(channel=channel, global_feat=True, feature_transform=use_feattrans)
+
 
 def feature_transform_regularizer(trans):
     d = trans.size()[1]

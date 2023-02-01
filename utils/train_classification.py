@@ -14,17 +14,19 @@ from pointnet.dataset import ShapeNetDataset, ModelNetDataset
 from pointnet.model import PointNetCls, feature_transform_regularizer
 import torch.nn.functional as F
 from tqdm import tqdm
+import datetime
 
 
+# for debug convenience, set default values for all arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--batch_size',   type=int, default=8, help='input batch size')
+parser.add_argument('--batch_size',   type=int, default=16, help='input batch size')
 parser.add_argument('--num_points',   type=int, default=1024, help='points per sample')
-parser.add_argument('--workers',      type=int, default=4, help='number of data loading workers')
+parser.add_argument('--workers',      type=int, default=8, help='number of data loading workers')
 parser.add_argument('--nepoch',       type=int, default=100, help='number of epochs to train for')
 parser.add_argument('--out_folder',   type=str, default="cls", help='output folder [cls|seg]')
 parser.add_argument('--model',        type=str, default="", help='existing previous model path')
-parser.add_argument('--dataset_path', type=str, required=True, help="dataset path")
-parser.add_argument('--dataset_type', type=str, default="modelnet40", help="dataset type [shapenet|modelnet40]")
+parser.add_argument('--dataset_path', type=str, default="", help="dataset path", required=True)
+parser.add_argument('--dataset_type', type=str, default="", help="dataset type [shapenet|modelnet40|s3dis]")
 parser.add_argument('--feature_transform', action='store_true', help="use feature transform")
 
 opt = parser.parse_args()
@@ -91,29 +93,30 @@ if opt.model != '':
     classifier.load_state_dict(torch.load(opt.model))
 optimizer = optim.Adam(classifier.parameters(), lr=0.001, betas=(0.9, 0.999))
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
-classifier.cuda() # after giving out parameters, then shift to gpu
+classifier = classifier.cuda() # after giving out parameters, then shift to gpu
 
-tensorboard_writer = tensorboardX.SummaryWriter(os.path.join(opt.out_folder, "tf_log_bs%d_np%d_dt[%s]"%(opt.batch_size, opt.num_points, opt.dataset_type)))
+tensorboard_writer = tensorboardX.SummaryWriter(os.path.join(opt.out_folder, "tf_log_%s_bs%d_np%d_nk%d_tf%i_dt%s"%(datetime.datetime.now().strftime("%Y-%m-%d.%H:%M:%S"), opt.batch_size, opt.num_points, opt.workers, opt.feature_transform, opt.dataset_type)))
 num_batch = len(dataset) / opt.batch_size
 for epoch in range(opt.nepoch):
     for i, data in tqdm(enumerate(dataloader, 0), total=int(num_batch), ncols=100, desc="batch progress"):
-        points, target = data
+        points, target = data # points.Size([batch_size, sample_points_num, 3(for x, y, z)])
         target = target[:, 0]
-        points = points.transpose(2, 1)
+        points = points.transpose(2, 1) # points.Size([batch_size, channel_size, sample_points_num])
         points, target = points.cuda(), target.cuda()
         optimizer.zero_grad()
         classifier = classifier.train()
-        pred, trans, trans_feat = classifier(points)
+        pred, trans, trans_feat = classifier(points) # pred shape: torch.Size([batch_size, cls_num])
         loss = F.nll_loss(pred, target)
         if opt.feature_transform:
             loss += feature_transform_regularizer(trans_feat) * 0.001
         loss.backward()
         optimizer.step()
-        pred_choice = pred.data.max(1)[1]
-        correct = pred_choice.eq(target.data).cpu().sum()
-        tqdm.write(" %s loss: %.3f accr: %.3f" % (blue("train"), loss.item(), correct.item() / float(opt.batch_size)))
+
+        pred_choice = pred.data.max(1)[1] # pred.shape: [batch_size]
+        correct = pred_choice.eq(target.data).cpu().sum().item() / float(opt.batch_size) # target.shape: torch.Size([batch_size])
+        tqdm.write(" %s loss: %.3f accr: %.3f" % (blue("train"), loss.item(), correct))
         tensorboard_writer.add_scalar(tag="train loss", scalar_value=loss.item(), global_step=(epoch * num_batch + i + 1))
-        tensorboard_writer.add_scalar(tag="train accr", scalar_value=correct.item(), global_step=(epoch * num_batch + i + 1))
+        tensorboard_writer.add_scalar(tag="train accr", scalar_value=correct, global_step=(epoch * num_batch + i + 1))
 
         if i % 10 == 0:
             j, data = next(enumerate(testdataloader, 0))
