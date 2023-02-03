@@ -163,12 +163,12 @@ def class_info_dump(sem_pred_choice: torch.Tensor, target: torch.Tensor, global_
     accr_dict = dict()
     for cls in range(num_classes):
         accr_dict[id2cls[cls]] = total_accr[cls] / total_seen[cls] # avoid zero-division
-    tensorboard_writer.add_scalars(main_tag=main_tag, tag_scalar_dict=accr_dict, global_step=global_step)
+    tensorboard_writer.add_scalars(main_tag="%s/class_accr" % main_tag, tag_scalar_dict=accr_dict, global_step=global_step)
 
     ciou_dict = dict()
     for cls in range(num_classes):
         ciou_dict[id2cls[cls]] = total_accr[cls] / total_diou[cls] # avoid zero-division
-    tensorboard_writer.add_scalars(main_tag=main_tag, tag_scalar_dict=ciou_dict, global_step=global_step)
+    tensorboard_writer.add_scalars(main_tag="%s/class_ciou" % main_tag, tag_scalar_dict=ciou_dict, global_step=global_step)
 
     for (cls, accr), (_, ciou) in zip(accr_dict.items(), ciou_dict.items()):
         tqdm.write("    %s\taccr: %.3f, ciou: %.3f" % (blue(cls), accr, ciou))
@@ -257,7 +257,6 @@ def train_one_epoch(epoch_num):
     tqdm.write("%s loss: %.3f, accr: %.3f"%(gren("epoch"), epoch_loss, epoch_accr))
     tensorboard_writer.add_scalar(tag="train/epoch_loss", scalar_value=epoch_loss, global_step=epoch_num)
     tensorboard_writer.add_scalar(tag="train/epoch_accr", scalar_value=epoch_accr, global_step=epoch_num)
-
 
 def testt_one_epoch(epoch_num):
     batch_num_per_epoch = len(test_dataset) / args.batch_size
