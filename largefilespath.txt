@@ -1,1 +1,0 @@
-utils/train_semantic.py cls/models/cls_bs8_np1024_dt[modelnet40]_9.pth cls/models/cls_bs8_np1024_dt[modelnet40]_99.pth cls/tf_log_bs16_np1024_nk8_tf1_dt[modelnet40]/events.out.tfevents.1674873524.hm misc/show3d.png 
