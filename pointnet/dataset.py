@@ -209,8 +209,8 @@ class ModelNetDataset(data.Dataset):
 class S3DISNetDataset(data.Dataset):
     def __init__(
             self,
-            split="train",
             data_root='trainval_fullarea', 
+            split="train",
             num_point=4096, test_area=5, block_size=1.0, sample_rate=1.0, transform=None
         ):
         super().__init__()
@@ -219,20 +219,21 @@ class S3DISNetDataset(data.Dataset):
         self.transform = transform
 
         areas = sorted(os.listdir(data_root))
+        test_area = "Area_%d"%test_area
         rooms_split = []
         for area in areas:
-            if split == "train" and area == "Area_5":
+            if split == "train" and area == test_area:
                 continue
-            if split == "test"  and area != "Area_5":
+            if split == "test"  and area != test_area:
                 continue
-            rooms_split.extend([(area, room) for room in os.listdir(os.path.join(data_root, area)) if room.endswith(".ply")])
+            rooms_split.extend([(area, room) for room in sorted(os.listdir(os.path.join(data_root, area))) if room.endswith(".ply")])
 
         self.room_points, self.room_labels = [], []
         self.room_coord_min, self.room_coord_max = [], []
         num_point_all = []
         labelweights = np.zeros(14) # initialize weights of each class
 
-        for area, room in tqdm(rooms_split, total=len(rooms_split)):
+        for area, room in rooms_split:
             room_path = os.path.join(data_root, area, room)
             plydata = PlyData.read(room_path)
             room_data = np.vstack(
@@ -247,7 +248,7 @@ class S3DISNetDataset(data.Dataset):
                 ]
             ).T
             points, labels = room_data[:, 0:6], room_data[:, 6]  # [x,y,z,r,g,b], [l]
-            tmp, _ = np.histogram(labels, range(14)) # labels in this room, possible classes are 0-13, so we use range(14)
+            tmp, _ = np.histogram(labels, range(0, 15)) # labels in this room, possible classes are 0-13, so we use range(14)
             labelweights += tmp
             coord_min, coord_max = np.amin(points, axis=0)[:3], np.amax(points, axis=0)[:3] # min/max value from 3 dims [x,y,z]
             self.room_points.append(points), self.room_labels.append(labels)
@@ -256,8 +257,8 @@ class S3DISNetDataset(data.Dataset):
 
         labelweights = labelweights.astype(np.float32)
         labelweights = labelweights / np.sum(labelweights)
-        self.labelweights = np.power(np.amax(labelweights) / labelweights, 1 / 3.0)#（倒数*最大值）^(1/3)
-        print(self.labelweights) # 统计所有训练数据的各类权重
+        self.labelweights = np.power(np.amax(labelweights) / labelweights, 1 / 3.0) #（倒数*最大值）^(1/3)
+        print(self.labelweights) # 样本中所含各类标签权重
         sample_prob = num_point_all / np.sum(num_point_all) # 每个房间的点数/所有房间点总数
         num_iter = int(np.sum(num_point_all) * sample_rate / num_point) # 迭代次数：所有房间总点数*采样率（1代表全采）/4096 总共要迭代这么多次才能把所有房间采完
         room_idxs = []
@@ -265,13 +266,13 @@ class S3DISNetDataset(data.Dataset):
             room_idxs.extend([index] * int(round(sample_prob[index] * num_iter))) # 不断往后面添加元素，添加元素为索引0~203，每次循环添加个数为：迭代次数*该索引房间的采样率。元素（索引0~204）的个数就是对应索引的房间采样的次数
         self.room_idxs = np.array(room_idxs) # 每次采样都是按照room_idxs中的元素选房间来采,按比例分配的思想，不是随机采或者大家一样
         print("Totally {} samples in {} set.".format(len(self.room_idxs), split)) # 样本数
- 
+
     def __getitem__(self, idx):
         room_idx = self.room_idxs[idx]
         points = self.room_points[room_idx] # 该索引房间内的所有点 n * 6
         labels = self.room_labels[room_idx] # 该索引房间内所有点的标签 n
         N_points = points.shape[0]
- 
+
         while (True):
             center = points[np.random.choice(N_points)][:3] # 随机选择一个点坐标作为block中心
             block_min = center - [self.block_size / 2.0, self.block_size / 2.0, 0] # block的区域范围：三个坐标的最小值
@@ -279,20 +280,20 @@ class S3DISNetDataset(data.Dataset):
             point_idxs = np.where((points[:, 0] >= block_min[0]) & (points[:, 0] <= block_max[0]) & (points[:, 1] >= block_min[1]) & (points[:, 1] <= block_max[1]))[0]#在block范围内的点的索引
             if point_idxs.size > 1024: # 直到采集的点超过1024个，否则就再随机采
                 break
- 
+        
         if point_idxs.size >= self.num_point: # 如果采的点比4096多就再选4096，少就复制一些点凑满4096
             selected_point_idxs = np.random.choice(point_idxs, self.num_point, replace=False) # 就在这些点里面再随机选4096个
         else:
             selected_point_idxs = np.random.choice(point_idxs, self.num_point, replace=True) # replace:True表示可以取相同数字，False表示不可以取相同数字
- 
+
         # normalize
         selected_points = points[selected_point_idxs, :]  # num_point * 6
         current_points = np.zeros((self.num_point, 9))  # num_point * 9
         current_points[:, 6] = selected_points[:, 0] / self.room_coord_max[room_idx][0] #论文中提到的输入为9维，最后三维为该点在房间中的相对位置
         current_points[:, 7] = selected_points[:, 1] / self.room_coord_max[room_idx][1]
         current_points[:, 8] = selected_points[:, 2] / self.room_coord_max[room_idx][2]
-        selected_points[:, 0] = selected_points[:, 0] - center[0] #对x,y去中心化,但z没有
-        selected_points[:, 1] = selected_points[:, 1] - center[1]
+        selected_points[:, 0] = selected_points[:, 0] - center[0] # 对x,y去中心化,但z没有
+        selected_points[:, 1] = selected_points[:, 1] - center[1] # 对x,y去中心化,但z没有
         selected_points[:, 3:6] /= 255.0 # RGB归一化
         current_points[:, 0:6] = selected_points
         current_labels = labels[selected_point_idxs]

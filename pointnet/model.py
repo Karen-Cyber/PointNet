@@ -185,7 +185,7 @@ class PointNetDenseCls(nn.Module):
         super(PointNetDenseCls, self).__init__()
         self.k = k
         self.use_feattrans=use_feattrans
-        self.feat = PointNetfeat(channel=3, global_feat=False, feature_transform=use_feattrans)
+        self.feat = PointNetfeat(in_channel=3, ft_channel=64, global_feat=False, feature_transform=use_feattrans)
         self.conv1 = torch.nn.Conv1d(1088, 512, 1)
         self.conv2 = torch.nn.Conv1d(512, 256, 1)
         self.conv3 = torch.nn.Conv1d(256, 128, 1)
@@ -208,10 +208,31 @@ class PointNetDenseCls(nn.Module):
         return x, trans, trans_feat
 
 class PointNetSegmnCls(nn.Module):
-    def __init__(self, channel=9, use_feattrans=False) -> None:
+    def __init__(self, in_channel=9, num_cls=14, use_feattrans=True) -> None:
         super(PointNetSegmnCls, self).__init__()
         # output of STN-feat block is concatenated to the back of original input
-        self.feat = PointNetfeat(channel=channel, global_feat=True, feature_transform=use_feattrans)
+        self.k = num_cls
+        self.feat = PointNetfeat(in_channel=in_channel, ft_channel=64, global_feat=False, feature_transform=use_feattrans)
+        self.conv1 = torch.nn.Conv1d(in_channels=1088, out_channels=512,    kernel_size=1)
+        self.conv2 = torch.nn.Conv1d(in_channels=512,  out_channels=256,    kernel_size=1)
+        self.conv3 = torch.nn.Conv1d(in_channels=256,  out_channels=128,    kernel_size=1)
+        self.conv4 = torch.nn.Conv1d(in_channels=128,  out_channels=self.k, kernel_size=1)
+        self.bn1 = nn.BatchNorm1d(512)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.bn3 = nn.BatchNorm1d(128)
+    
+    def forward(self, x: torch.Tensor):
+        batch_size, n_pts = x.size()[0], x.size()[2]
+        x, trans, trans_feat = self.feat(x) # spatial trans: 3x3, feature trans: 64x64
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.conv4(x)
+
+        x = x.transpose(2, 1).contiguous()
+        x = F.log_softmax(x.view(-1, self.k), dim=-1) # used with NLLLoss
+        x = x.view(batch_size, n_pts, self.k)
+        return x, trans, trans_feat
 
 
 def feature_transform_regularizer(trans):

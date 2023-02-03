@@ -7,7 +7,6 @@ data
 .idea*
 *.egg-info/
 shapenetcore_partanno_segmentation_benchmark_v0/
-cls/
-seg/
+results/
 datasets/*
 .vscode/*

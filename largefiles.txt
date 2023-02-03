@@ -1,0 +1,5 @@
+5ffae5419c3e30faf10c4c09752f100b78864b29 utils/train_semantic.py
+1be07f7aabd1075f4d23fc516b36ec85cd42af5d cls/models/cls_bs8_np1024_dt[modelnet40]_9.pth
+5724e41a3bd451219275c1fd261dec8b35f25a57 cls/models/cls_bs8_np1024_dt[modelnet40]_99.pth
+514a43f860d3e1d744024029a72a1b18c4f5ea09 cls/tf_log_bs16_np1024_nk8_tf1_dt[modelnet40]/events.out.tfevents.1674873524.hm
+69f5b050c656c727f729643c496726c68e8aa23a misc/show3d.png

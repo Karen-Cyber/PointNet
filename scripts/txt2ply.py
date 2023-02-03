@@ -25,7 +25,7 @@ cls2id = {
     "column" :10,
     "sofa" :11,
     "window" :12,
-    "stairs" :13,
+    "stairs" :13
 }
 id2cls = {v : k for k, v in cls2id.items()}
 ply_line_type = np.dtype([("x", "f4"), ("y", "f4"), ("z", "f4"), ("red", "u1"), ("green", "u1"), ("blue", "u1"), ("label", "u1")])

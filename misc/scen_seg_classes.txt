@@ -1,0 +1,14 @@
+beam 0
+board 1
+bookcase 2
+ceiling 3
+chair 4
+clutter 5
+door 6
+floor 7
+table 8
+wall 9
+column 10
+sofa 11
+window 12
+stairs 13
